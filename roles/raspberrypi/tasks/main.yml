@@ -76,44 +76,61 @@
       import os
       import sys
       
+      # Disable audio to avoid ALSA errors
+      os.environ['SDL_AUDIODRIVER'] = 'dummy'
+      
       # Use framebuffer for HDMI 1 (second display)
       os.environ['SDL_FBDEV'] = '/dev/fb1'
       os.environ['SDL_VIDEODRIVER'] = 'fbcon'
+      os.environ['SDL_NOMOUSE'] = '1'
       
+      # Initialize pygame with no audio
+      pygame.mixer.pre_init(frequency=0, size=0, channels=0, buffer=0)
       pygame.init()
       
-      # Get display info
-      info = pygame.display.Info()
-      screen = pygame.display.set_mode((info.current_w, info.current_h), pygame.FULLSCREEN)
-      pygame.display.set_caption("HDMI Port 2 Output")
-      
-      clock = pygame.time.Clock()
-      running = True
-      
-      while running:
-          for event in pygame.event.get():
-              if event.type == pygame.QUIT:
-                  running = False
-              elif event.type == pygame.KEYDOWN:
-                  if event.key == pygame.K_ESCAPE:
+      # Initialize display first, then get info
+      try:
+          # Try to set a basic mode first
+          screen = pygame.display.set_mode((1920, 1080), pygame.FULLSCREEN)
+          pygame.display.set_caption("HDMI Port 2 Output")
+          
+          # Get actual display info after initialization
+          info = pygame.display.Info()
+          print(f"Display resolution: {info.current_w}x{info.current_h}")
+          
+          clock = pygame.time.Clock()
+          running = True
+          
+          while running:
+              for event in pygame.event.get():
+                  if event.type == pygame.QUIT:
                       running = False
+                  elif event.type == pygame.KEYDOWN:
+                      if event.key == pygame.K_ESCAPE:
+                          running = False
+              
+              # Fill screen with changing colors
+              import time
+              color_value = int((time.time() * 50) % 255)
+              screen.fill((color_value, 100, 255 - color_value))
+              
+              # Draw some text
+              font = pygame.font.Font(None, 74)
+              text = font.render("HDMI Port 2 - Pygame Display", True, (255, 255, 255))
+              text_rect = text.get_rect(center=(screen.get_width()//2, screen.get_height()//2))
+              screen.blit(text, text_rect)
+              
+              pygame.display.flip()
+              clock.tick(60)
           
-          # Fill screen with changing colors
-          import time
-          color_value = int((time.time() * 50) % 255)
-          screen.fill((color_value, 100, 255 - color_value))
-          
-          # Draw some text
-          font = pygame.font.Font(None, 74)
-          text = font.render("HDMI Port 2 - Pygame Display", True, (255, 255, 255))
-          text_rect = text.get_rect(center=(info.current_w//2, info.current_h//2))
-          screen.blit(text, text_rect)
-          
-          pygame.display.flip()
-          clock.tick(60)
-      
-      pygame.quit()
-      sys.exit()
+      except pygame.error as e:
+          print(f"Pygame error: {e}")
+          print("Make sure you're running on the Pi with framebuffer access")
+      except Exception as e:
+          print(f"Error: {e}")
+      finally:
+          pygame.quit()
+          sys.exit()
     dest: /home/pi/scripts/hdmi2_display.py
     owner: pi
     group: pi
