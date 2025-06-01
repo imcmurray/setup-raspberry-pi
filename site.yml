@@ -1,0 +1,6 @@
+---
+- name: Setup Raspberry Pi 4 with dual HDMI
+  hosts: raspberrypis
+  become: yes
+  roles:
+    - raspberrypi

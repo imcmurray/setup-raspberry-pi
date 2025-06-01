@@ -1,0 +1,112 @@
+---
+- name: Update package cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Install required packages
+  apt:
+    name:
+      - python3-pip
+      - python3-dev
+      - python3-pygame
+      - git
+      - vim
+      - htop
+    state: present
+
+- name: Enable SSH service
+  systemd:
+    name: ssh
+    enabled: yes
+    state: started
+
+- name: Configure SSH to allow password authentication initially
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?PasswordAuthentication'
+    line: 'PasswordAuthentication yes'
+    backup: yes
+  notify: restart ssh
+
+- name: Install Python packages for pygame development
+  pip:
+    name:
+      - pygame
+      - numpy
+      - pillow
+    state: present
+
+- name: Copy boot configuration for dual HDMI
+  template:
+    src: config.txt.j2
+    dest: /boot/firmware/config.txt
+    backup: yes
+  notify: reboot required
+
+- name: Disable WiFi service
+  systemd:
+    name: wpa_supplicant
+    enabled: no
+    state: stopped
+  ignore_errors: yes
+
+- name: Create pygame display script directory
+  file:
+    path: /home/pi/scripts
+    state: directory
+    owner: pi
+    group: pi
+    mode: '0755'
+
+- name: Create sample pygame script for HDMI 1
+  copy:
+    content: |
+      #!/usr/bin/env python3
+      import pygame
+      import os
+      import sys
+      
+      # Use framebuffer for HDMI 1 (second display)
+      os.environ['SDL_FBDEV'] = '/dev/fb1'
+      os.environ['SDL_VIDEODRIVER'] = 'fbcon'
+      
+      pygame.init()
+      
+      # Get display info
+      info = pygame.display.Info()
+      screen = pygame.display.set_mode((info.current_w, info.current_h), pygame.FULLSCREEN)
+      pygame.display.set_caption("HDMI Port 2 Output")
+      
+      clock = pygame.time.Clock()
+      running = True
+      
+      while running:
+          for event in pygame.event.get():
+              if event.type == pygame.QUIT:
+                  running = False
+              elif event.type == pygame.KEYDOWN:
+                  if event.key == pygame.K_ESCAPE:
+                      running = False
+          
+          # Fill screen with changing colors
+          import time
+          color_value = int((time.time() * 50) % 255)
+          screen.fill((color_value, 100, 255 - color_value))
+          
+          # Draw some text
+          font = pygame.font.Font(None, 74)
+          text = font.render("HDMI Port 2 - Pygame Display", True, (255, 255, 255))
+          text_rect = text.get_rect(center=(info.current_w//2, info.current_h//2))
+          screen.blit(text, text_rect)
+          
+          pygame.display.flip()
+          clock.tick(60)
+      
+      pygame.quit()
+      sys.exit()
+    dest: /home/pi/scripts/hdmi2_display.py
+    owner: pi
+    group: pi
+    mode: '0755'
+
