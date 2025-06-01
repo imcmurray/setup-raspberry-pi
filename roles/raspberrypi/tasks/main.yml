@@ -15,12 +15,6 @@
       - htop
     state: present
 
-- name: Enable SSH service
-  systemd:
-    name: ssh
-    enabled: yes
-    state: started
-
 - name: Configure SSH to allow password authentication initially
   lineinfile:
     path: /etc/ssh/sshd_config
