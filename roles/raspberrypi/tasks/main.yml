@@ -17,6 +17,8 @@
       - xinit
       - x11-xserver-utils
       - openbox
+      - lightdm
+      - xfce4-session
     state: present
 
 - name: Configure SSH to allow password authentication initially
@@ -108,6 +110,12 @@
     group: root
     mode: '0644'
 
+- name: Enable and start lightdm display manager
+  systemd:
+    name: lightdm
+    enabled: yes
+    state: started
+
 - name: Create X11 startup script for second display
   copy:
     content: |
@@ -148,7 +156,7 @@
           print("Starting pygame on second HDMI display...")
           
           # Set up environment for X11 on second display
-          os.environ['DISPLAY'] = ':0.1'
+          os.environ['DISPLAY'] = ':0'
           os.environ['SDL_VIDEODRIVER'] = 'x11'
           os.environ['SDL_AUDIODRIVER'] = 'dummy'
           
@@ -224,14 +232,16 @@
   copy:
     content: |
       #!/bin/bash
-      echo "Starting X11 and pygame on second HDMI..."
+      echo "Running pygame on second HDMI display..."
       
-      # Start X11 in background
-      sudo systemctl start lightdm 2>/dev/null || true
-      sleep 3
+      # Wait for X11 to be ready
+      while ! xset q &>/dev/null; do
+          echo "Waiting for X11 to start..."
+          sleep 2
+      done
       
       # Set display and run pygame
-      export DISPLAY=:0.1
+      export DISPLAY=:0
       cd /home/pi
       source pygame_env/bin/activate
       python3 scripts/hdmi2_display.py
