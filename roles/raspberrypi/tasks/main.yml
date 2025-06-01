@@ -50,7 +50,7 @@
   template:
     src: config.txt.j2
     dest: /boot/firmware/config.txt
-    backup: yes
+    backup: no
   notify: reboot required
 
 - name: Disable WiFi service
