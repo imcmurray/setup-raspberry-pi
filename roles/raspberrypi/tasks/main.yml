@@ -85,12 +85,21 @@
       import sys
       
       def setup_display():
-          """Setup display with fallback options"""
-          print("Setting up display...")
+          """Setup display targeting the second HDMI port"""
+          print("Setting up display for second HDMI port...")
           
-          # Check if framebuffer devices exist
+          # List all available displays
           import subprocess
           try:
+              # Check for DRM displays (modern approach)
+              result = subprocess.run(['ls', '-la', '/dev/dri/'], capture_output=True, text=True)
+              print("Available DRM devices:")
+              print(result.stdout)
+          except:
+              print("No DRM devices found")
+          
+          try:
+              # Check framebuffers
               result = subprocess.run(['ls', '-la', '/dev/fb*'], capture_output=True, text=True)
               print("Available framebuffers:")
               print(result.stdout)
@@ -99,34 +108,36 @@
               has_fb = False
               print("No framebuffer devices found")
           
-          # Try different video drivers
-          drivers_to_try = []
+          # Try different approaches to target second display
+          approaches = [
+              # Try KMS (Kernel Mode Setting) - modern approach
+              ('kmsdrm', {'SDL_VIDEODRIVER': 'kmsdrm'}),
+              # Try direct framebuffer access
+              ('fbcon_fb1', {'SDL_VIDEODRIVER': 'fbcon', 'SDL_FBDEV': '/dev/fb1'}) if has_fb else None,
+              ('fbcon_fb0', {'SDL_VIDEODRIVER': 'fbcon', 'SDL_FBDEV': '/dev/fb0'}) if has_fb else None,
+              # Try X11 targeting specific display
+              ('x11_display1', {'SDL_VIDEODRIVER': 'x11', 'DISPLAY': ':0.1'}),
+              # Fallback to dummy
+              ('dummy', {'SDL_VIDEODRIVER': 'dummy'}),
+          ]
           
-          if has_fb:
-              drivers_to_try.extend([
-                  ('fbcon', '/dev/fb1'),
-                  ('fbcon', '/dev/fb0'),
-              ])
+          # Filter out None entries
+          approaches = [a for a in approaches if a is not None]
           
-          # Add fallback drivers
-          drivers_to_try.extend([
-              ('dummy', None),
-          ])
-          
-          for driver, fbdev in drivers_to_try:
+          for name, env_vars in approaches:
               try:
-                  print(f"Trying {driver} driver{' with ' + fbdev if fbdev else ''}...")
+                  print(f"Trying {name} approach...")
                   
-                  # Reset environment
-                  for env_var in ['SDL_VIDEODRIVER', 'SDL_FBDEV']:
+                  # Reset SDL environment
+                  for env_var in ['SDL_VIDEODRIVER', 'SDL_FBDEV', 'DISPLAY']:
                       if env_var in os.environ:
                           del os.environ[env_var]
                   
-                  # Set driver-specific environment
-                  os.environ['SDL_VIDEODRIVER'] = driver
-                  if fbdev:
-                      os.environ['SDL_FBDEV'] = fbdev
+                  # Set new environment
+                  for key, value in env_vars.items():
+                      os.environ[key] = value
                   
+                  # Common SDL settings
                   os.environ['SDL_NOMOUSE'] = '1'
                   os.environ['SDL_NOKEYBOARD'] = '1'
                   
@@ -136,14 +147,14 @@
                   
                   # Try to create display
                   screen = pygame.display.set_mode((1920, 1080), pygame.FULLSCREEN)
-                  print(f"Successfully using {driver} driver!")
-                  return screen, driver
+                  print(f"Successfully using {name}!")
+                  return screen, name
                   
               except Exception as e:
-                  print(f"Failed with {driver}: {e}")
+                  print(f"Failed with {name}: {e}")
                   continue
           
-          raise Exception("No working display driver found")
+          raise Exception("No working display approach found")
       
       def main():
           # Disable audio to avoid ALSA errors
