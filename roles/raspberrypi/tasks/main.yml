@@ -13,6 +13,10 @@
       - git
       - vim
       - htop
+      - xorg
+      - xinit
+      - x11-xserver-utils
+      - openbox
     state: present
 
 - name: Configure SSH to allow password authentication initially
@@ -53,13 +57,68 @@
     backup: no
   notify: reboot required
 
-- name: Add framebuffer console to kernel command line
-  lineinfile:
-    path: /boot/firmware/cmdline.txt
-    regexp: '^(.*?)(\s*fbcon=.*?)?\s*$'
-    line: '\1 fbcon=map:1'
-    backrefs: yes
-  ignore_errors: yes
+- name: Create X11 configuration for dual displays
+  copy:
+    content: |
+      Section "ServerLayout"
+          Identifier     "DualHead"
+          Screen      0  "Screen0" 0 0
+          Screen      1  "Screen1" RightOf "Screen0"
+      EndSection
+
+      Section "Monitor"
+          Identifier   "HDMI-1"
+          Option       "Primary" "true"
+      EndSection
+
+      Section "Monitor"
+          Identifier   "HDMI-2"
+          Option       "Primary" "false"
+      EndSection
+
+      Section "Device"
+          Identifier  "Card0"
+          Driver      "modesetting"
+          Option      "kmsdev" "/dev/dri/card0"
+      EndSection
+
+      Section "Screen"
+          Identifier "Screen0"
+          Device     "Card0"
+          Monitor    "HDMI-1"
+          DefaultDepth 24
+          SubSection "Display"
+              Depth    24
+              Modes    "1920x1080"
+          EndSubSection
+      EndSection
+
+      Section "Screen"
+          Identifier "Screen1"
+          Device     "Card0"
+          Monitor    "HDMI-2"
+          DefaultDepth 24
+          SubSection "Display"
+              Depth    24
+              Modes    "1920x1080"
+          EndSubSection
+      EndSection
+    dest: /etc/X11/xorg.conf.d/99-dual-hdmi.conf
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Create X11 startup script for second display
+  copy:
+    content: |
+      #!/bin/bash
+      # Start X11 on second display for pygame
+      export DISPLAY=:0.1
+      startx /usr/bin/openbox-session -- :0 -layout DualHead vt7
+    dest: /home/pi/start_x11_display2.sh
+    owner: pi
+    group: pi
+    mode: '0755'
 
 - name: Disable WiFi service
   systemd:
@@ -76,153 +135,107 @@
     group: pi
     mode: '0755'
 
-- name: Create sample pygame script for HDMI 1
+- name: Create sample pygame script for HDMI 2
   copy:
     content: |
       #!/home/pi/pygame_env/bin/python3
       import pygame
       import os
       import sys
-      
-      def setup_display():
-          """Setup display targeting the second HDMI port"""
-          print("Setting up display for second HDMI port...")
-          
-          # List all available displays
-          import subprocess
-          try:
-              # Check for DRM displays (modern approach)
-              result = subprocess.run(['ls', '-la', '/dev/dri/'], capture_output=True, text=True)
-              print("Available DRM devices:")
-              print(result.stdout)
-          except:
-              print("No DRM devices found")
-          
-          try:
-              # Check framebuffers
-              result = subprocess.run(['ls', '-la', '/dev/fb*'], capture_output=True, text=True)
-              print("Available framebuffers:")
-              print(result.stdout)
-              has_fb = '/dev/fb' in result.stdout
-          except:
-              has_fb = False
-              print("No framebuffer devices found")
-          
-          # Try different approaches to target second display
-          approaches = [
-              # Try KMS (Kernel Mode Setting) - modern approach
-              ('kmsdrm', {'SDL_VIDEODRIVER': 'kmsdrm'}),
-              # Try direct framebuffer access
-              ('fbcon_fb1', {'SDL_VIDEODRIVER': 'fbcon', 'SDL_FBDEV': '/dev/fb1'}) if has_fb else None,
-              ('fbcon_fb0', {'SDL_VIDEODRIVER': 'fbcon', 'SDL_FBDEV': '/dev/fb0'}) if has_fb else None,
-              # Try X11 targeting specific display
-              ('x11_display1', {'SDL_VIDEODRIVER': 'x11', 'DISPLAY': ':0.1'}),
-              # Fallback to dummy
-              ('dummy', {'SDL_VIDEODRIVER': 'dummy'}),
-          ]
-          
-          # Filter out None entries
-          approaches = [a for a in approaches if a is not None]
-          
-          for name, env_vars in approaches:
-              try:
-                  print(f"Trying {name} approach...")
-                  
-                  # Reset SDL environment
-                  for env_var in ['SDL_VIDEODRIVER', 'SDL_FBDEV', 'DISPLAY']:
-                      if env_var in os.environ:
-                          del os.environ[env_var]
-                  
-                  # Set new environment
-                  for key, value in env_vars.items():
-                      os.environ[key] = value
-                  
-                  # Common SDL settings
-                  os.environ['SDL_NOMOUSE'] = '1'
-                  os.environ['SDL_NOKEYBOARD'] = '1'
-                  
-                  # Reinitialize pygame
-                  pygame.quit()
-                  pygame.init()
-                  
-                  # Try to create display
-                  screen = pygame.display.set_mode((1920, 1080), pygame.FULLSCREEN)
-                  print(f"Successfully using {name}!")
-                  return screen, name
-                  
-              except Exception as e:
-                  print(f"Failed with {name}: {e}")
-                  continue
-          
-          raise Exception("No working display approach found")
+      import time
       
       def main():
-          # Disable audio to avoid ALSA errors
+          print("Starting pygame on second HDMI display...")
+          
+          # Set up environment for X11 on second display
+          os.environ['DISPLAY'] = ':0.1'
+          os.environ['SDL_VIDEODRIVER'] = 'x11'
           os.environ['SDL_AUDIODRIVER'] = 'dummy'
           
-          # Initialize pygame with no audio
+          # Initialize pygame
           pygame.mixer.pre_init(frequency=0, size=0, channels=0, buffer=0)
+          pygame.init()
           
           try:
-              screen, driver = setup_display()
-              pygame.display.set_caption("HDMI Port 2 Output")
+              # Create fullscreen display on second monitor
+              screen = pygame.display.set_mode((1920, 1080), pygame.FULLSCREEN)
+              pygame.display.set_caption("HDMI Port 2 - Pygame Display")
               
-              # Get actual display info after initialization
-              info = pygame.display.Info()
-              print(f"Display resolution: {info.current_w}x{info.current_h}")
+              print("Successfully created display on second HDMI!")
               print(f"Screen size: {screen.get_width()}x{screen.get_height()}")
-              print(f"Using driver: {driver}")
               
               clock = pygame.time.Clock()
               running = True
               frame_count = 0
               
-              print("Starting display loop. Press Ctrl+C to exit.")
+              print("Display running. Press Ctrl+C to exit.")
               
               while running:
+                  # Handle events
                   for event in pygame.event.get():
                       if event.type == pygame.QUIT:
                           running = False
                       elif event.type == pygame.KEYDOWN:
-                          if event.key == pygame.K_ESCAPE:
+                          if event.key == pygame.K_ESCAPE or event.key == pygame.K_q:
                               running = False
                   
-                  # Fill screen with changing colors
-                  import time
+                  # Animated background
                   color_value = int((time.time() * 50) % 255)
                   screen.fill((color_value, 100, 255 - color_value))
                   
-                  # Draw some text
+                  # Draw text
                   font = pygame.font.Font(None, 74)
                   text = font.render(f"HDMI Port 2 - Frame {frame_count}", True, (255, 255, 255))
                   text_rect = text.get_rect(center=(screen.get_width()//2, screen.get_height()//2))
                   screen.blit(text, text_rect)
                   
+                  # Instructions
+                  small_font = pygame.font.Font(None, 36)
+                  instruction = small_font.render("Press ESC or Q to exit", True, (255, 255, 255))
+                  screen.blit(instruction, (50, 50))
+                  
                   pygame.display.flip()
                   clock.tick(60)
                   frame_count += 1
                   
-                  # Print status every 5 seconds
+                  # Status update
                   if frame_count % 300 == 0:
-                      print(f"Running... Frame {frame_count}")
+                      print(f"Frame {frame_count} - Running on HDMI 2")
               
-          except KeyboardInterrupt:
-              print("\nInterrupted by user")
-          except pygame.error as e:
-              print(f"Pygame error: {e}")
-              print(f"Current user: {os.getuid()}")
-              print("Try running as root: sudo python3 scripts/hdmi2_display.py")
           except Exception as e:
               print(f"Error: {e}")
+              print("\nTo fix:")
+              print("1. Start X11 first: ./start_x11_display2.sh")
+              print("2. Then run: DISPLAY=:0.1 python3 scripts/hdmi2_display.py")
               import traceback
               traceback.print_exc()
           finally:
               pygame.quit()
-              sys.exit()
+              print("pygame display closed")
       
       if __name__ == "__main__":
           main()
     dest: /home/pi/scripts/hdmi2_display.py
+    owner: pi
+    group: pi
+    mode: '0755'
+
+- name: Create simple startup script
+  copy:
+    content: |
+      #!/bin/bash
+      echo "Starting X11 and pygame on second HDMI..."
+      
+      # Start X11 in background
+      sudo systemctl start lightdm 2>/dev/null || true
+      sleep 3
+      
+      # Set display and run pygame
+      export DISPLAY=:0.1
+      cd /home/pi
+      source pygame_env/bin/activate
+      python3 scripts/hdmi2_display.py
+    dest: /home/pi/run_pygame.sh
     owner: pi
     group: pi
     mode: '0755'
