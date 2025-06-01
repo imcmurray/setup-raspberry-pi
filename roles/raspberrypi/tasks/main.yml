@@ -53,16 +53,12 @@
     backup: no
   notify: reboot required
 
-- name: Enable framebuffer console module
+- name: Add framebuffer console to kernel command line
   lineinfile:
-    path: /etc/modules
-    line: 'fbcon'
-    create: yes
-
-- name: Load framebuffer console module immediately
-  modprobe:
-    name: fbcon
-    state: present
+    path: /boot/firmware/cmdline.txt
+    regexp: '^(.*?)(\s*fbcon=.*?)?\s*$'
+    line: '\1 fbcon=map:1'
+    backrefs: yes
   ignore_errors: yes
 
 - name: Disable WiFi service
