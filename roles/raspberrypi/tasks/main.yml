@@ -53,6 +53,18 @@
     backup: no
   notify: reboot required
 
+- name: Enable framebuffer console module
+  lineinfile:
+    path: /etc/modules
+    line: 'fbcon'
+    create: yes
+
+- name: Load framebuffer console module immediately
+  modprobe:
+    name: fbcon
+    state: present
+  ignore_errors: yes
+
 - name: Disable WiFi service
   systemd:
     name: wpa_supplicant
@@ -76,9 +88,9 @@
       import os
       import sys
       
-      def setup_framebuffer():
-          """Setup framebuffer for HDMI 1 display"""
-          print("Setting up framebuffer for HDMI 1...")
+      def setup_display():
+          """Setup display with fallback options"""
+          print("Setting up display...")
           
           # Check if framebuffer devices exist
           import subprocess
@@ -86,32 +98,56 @@
               result = subprocess.run(['ls', '-la', '/dev/fb*'], capture_output=True, text=True)
               print("Available framebuffers:")
               print(result.stdout)
+              has_fb = '/dev/fb' in result.stdout
           except:
-              pass
+              has_fb = False
+              print("No framebuffer devices found")
           
-          # Set SDL environment for framebuffer
-          os.environ['SDL_VIDEODRIVER'] = 'fbcon'
-          os.environ['SDL_FBDEV'] = '/dev/fb1'
-          os.environ['SDL_NOMOUSE'] = '1'
-          os.environ['SDL_NOKEYBOARD'] = '1'
+          # Try different video drivers
+          drivers_to_try = []
           
-          # Initialize pygame
-          pygame.init()
+          if has_fb:
+              drivers_to_try.extend([
+                  ('fbcon', '/dev/fb1'),
+                  ('fbcon', '/dev/fb0'),
+              ])
           
-          try:
-              # Try fb1 first (HDMI 1)
-              screen = pygame.display.set_mode((1920, 1080), pygame.FULLSCREEN)
-              print("Successfully using /dev/fb1 (HDMI 1)")
-              return screen
-          except:
-              # Fallback to fb0 (HDMI 0)
-              print("fb1 failed, trying fb0...")
-              os.environ['SDL_FBDEV'] = '/dev/fb0'
-              pygame.quit()
-              pygame.init()
-              screen = pygame.display.set_mode((1920, 1080), pygame.FULLSCREEN)
-              print("Using /dev/fb0 (HDMI 0)")
-              return screen
+          # Add fallback drivers
+          drivers_to_try.extend([
+              ('dummy', None),
+          ])
+          
+          for driver, fbdev in drivers_to_try:
+              try:
+                  print(f"Trying {driver} driver{' with ' + fbdev if fbdev else ''}...")
+                  
+                  # Reset environment
+                  for env_var in ['SDL_VIDEODRIVER', 'SDL_FBDEV']:
+                      if env_var in os.environ:
+                          del os.environ[env_var]
+                  
+                  # Set driver-specific environment
+                  os.environ['SDL_VIDEODRIVER'] = driver
+                  if fbdev:
+                      os.environ['SDL_FBDEV'] = fbdev
+                  
+                  os.environ['SDL_NOMOUSE'] = '1'
+                  os.environ['SDL_NOKEYBOARD'] = '1'
+                  
+                  # Reinitialize pygame
+                  pygame.quit()
+                  pygame.init()
+                  
+                  # Try to create display
+                  screen = pygame.display.set_mode((1920, 1080), pygame.FULLSCREEN)
+                  print(f"Successfully using {driver} driver!")
+                  return screen, driver
+                  
+              except Exception as e:
+                  print(f"Failed with {driver}: {e}")
+                  continue
+          
+          raise Exception("No working display driver found")
       
       def main():
           # Disable audio to avoid ALSA errors
@@ -121,13 +157,14 @@
           pygame.mixer.pre_init(frequency=0, size=0, channels=0, buffer=0)
           
           try:
-              screen = setup_framebuffer()
+              screen, driver = setup_display()
               pygame.display.set_caption("HDMI Port 2 Output")
               
               # Get actual display info after initialization
               info = pygame.display.Info()
               print(f"Display resolution: {info.current_w}x{info.current_h}")
               print(f"Screen size: {screen.get_width()}x{screen.get_height()}")
+              print(f"Using driver: {driver}")
               
               clock = pygame.time.Clock()
               running = True
